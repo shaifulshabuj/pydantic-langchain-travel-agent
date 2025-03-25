@@ -8,6 +8,9 @@ pip install langchain langchain-openai pydantic streamlit python-dotenv langchai
 
 # Step-2:
 ## Set OPENAI_API_KEY in .env
+```
+OPENAI_API_KEY=
+```
 
 # Step-3:
 ## To start the travel agent:
