@@ -17,3 +17,6 @@ OPENAI_API_KEY=
 ```
 streamlit run travel_planner.py
 ```
+
+# Simulation
+![](streamlit-travel_planner-2025-04-03-17-04-31.webm)
