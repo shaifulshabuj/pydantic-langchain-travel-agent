@@ -18,5 +18,3 @@ OPENAI_API_KEY=
 streamlit run travel_planner.py
 ```
 
-# Simulation
-![](https://github.com/shaifulshabuj/pydantic-langchain-travel-agent/blob/main/travel_planner.mov)
