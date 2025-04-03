@@ -19,4 +19,4 @@ streamlit run travel_planner.py
 ```
 
 # Simulation
-![](https://github.com/shaifulshabuj/pydantic-langchain-travel-agent/blob/main/streamlit-travel_planner-2025-04-03-17-04-31.webm)
+![](https://github.com/shaifulshabuj/pydantic-langchain-travel-agent/blob/main/travel_planner.mov)
