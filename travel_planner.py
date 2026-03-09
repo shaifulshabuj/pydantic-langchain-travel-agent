@@ -1,13 +1,10 @@
 import streamlit as st
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
+from ollama import Client
 import json
 import logging
+import os
 from dotenv import load_dotenv
 
 # Loading env variables
@@ -59,49 +56,86 @@ class TravelPlan(BaseModel):
 # 2. Agent Definitions
 # --------------------------
 class BaseAgent:
-    def __init__(self, model="gpt-4-turbo"):
-        self.llm = ChatOpenAI(model=model, temperature=0.5)
+    def __init__(self, model: Optional[str] = None):
+        self.model = model or os.getenv("OLLAMA_MODEL", "llama3.1")
+        self.host = self._normalize_ollama_host(os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+        self.api_key = os.getenv("OLLAMA_API_KEY", "").strip()
+        self.client = self._create_client("bearer")
         self.tools = self._define_tools()
-        self.agent = self._create_agent()
+        self.system_prompt = self._system_prompt()
 
-    def _define_tools(self) -> List[tool]:
+    def _normalize_ollama_host(self, host: str) -> str:
+        normalized = host.rstrip("/")
+        if normalized.endswith("/api"):
+            normalized = normalized[:-4]
+        return normalized
+
+    def _create_client(self, auth_mode: str = "bearer") -> Client:
+        headers: Dict[str, str] = {}
+        if self.api_key:
+            if auth_mode == "bearer":
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            elif auth_mode == "raw":
+                headers["Authorization"] = self.api_key
+            elif auth_mode == "x-api-key":
+                headers["X-API-Key"] = self.api_key
+        return Client(host=self.host, headers=headers if headers else None)
+
+    def _define_tools(self) -> List[Any]:
         raise NotImplementedError
 
-    def _create_agent(self) -> AgentExecutor:
+    def _system_prompt(self) -> str:
         raise NotImplementedError
 
     def run(self, input: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            response = self.agent.invoke({"input": str(input)})
-            logger.info(f"Agent response: {response}")
-            return response
+            response = None
+            last_error: Optional[Exception] = None
+
+            # Hosted providers can vary auth header expectations.
+            auth_modes = ["bearer", "raw", "x-api-key"] if self.api_key else ["bearer"]
+            for auth_mode in auth_modes:
+                try:
+                    if auth_mode != "bearer":
+                        self.client = self._create_client(auth_mode)
+
+                    response = self.client.chat(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": json.dumps(input, ensure_ascii=True)}
+                        ]
+                    )
+                    break
+                except Exception as e:
+                    last_error = e
+                    message = str(e).lower()
+                    if "401" in message or "unauthorized" in message:
+                        continue
+                    raise
+
+            if response is None:
+                raise last_error if last_error else RuntimeError("Ollama request failed")
+
+            output_text = response.get("message", {}).get("content", "")
+
+            parsed = {"output": output_text, "raw": response}
+            logger.info(f"Agent response: {parsed}")
+            return parsed
         except Exception as e:
             logger.error(f"Error in agent execution: {str(e)}")
             raise
 
 class DestinationResearchAgent(BaseAgent):
-    def _define_tools(self) -> List[tool]:
-        @tool
-        def search_destinations(query: str) -> List[Dict]:
-            """Search for travel destinations matching criteria"""
-            logger.info(f"Searching destinations for: {query}")
-        return [search_destinations]
+    def _define_tools(self) -> List[Any]:
+        return []
 
-    def _create_agent(self) -> AgentExecutor:
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a travel destination expert. Help users find the perfect destination based on:
-             - Their interests
-             - Budget level
-             - Trip duration
-             - Departure location
-
-             Return a detailed response about why this destination matches their criteria."""),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad")
-        ])
-
-        agent = create_openai_tools_agent(self.llm, self.tools, prompt)
-        return AgentExecutor(agent=agent, tools=self.tools, handle_parsing_errors=True)
+    def _system_prompt(self) -> str:
+        return (
+            "You are a travel destination expert. Help users find the perfect destination based on "
+            "their interests, budget level, trip duration, and departure location. "
+            "Return a detailed response about why the destination matches their criteria."
+        )
 
 class TravelOrchestrator:
     def __init__(self):
